@@ -7,6 +7,9 @@
     "dev": "nodemon src/index.js",
     "start": "node src/index.js"
   },
+  "engines": {
+    "node": "20.x"
+  },
   "keywords": [],
   "author": "",
   "type": "module",
@@ -24,8 +27,5 @@
   },
   "devDependencies": {
     "nodemon": "^3.1.7"
-  },
-  "engines": {
-    "node": ">=20"
   }
 }
