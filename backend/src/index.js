@@ -13,12 +13,18 @@ dotenv.config();
 
 const PORT = process.env.PORT || 5001;
 const __dirname = path.resolve();
-
-app.use(express.json({ limit: "5mb" }));
+app.use(express.json({ limit: "10mb" }));
 app.use(cookieParser());
 app.use(
   cors({
-    origin: "http://localhost:5173", // MUST match the browser URL
+    origin: process.env.CLIENT_URL,
+    credentials: true,
+  }),
+);
+
+app.use(
+  cors({
+    origin: process.env.CLIENT_URL,
     credentials: true,
   }),
 );

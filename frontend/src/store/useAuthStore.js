@@ -2,9 +2,7 @@ import { create } from "zustand";
 import { axiosInstance } from "../lib/axios";
 import { io } from "socket.io-client";
 import toast from "react-hot-toast";
-
-const BASE_URL =
-  import.meta.env.MODE === "development" ? "http://localhost:5001" : "/";
+const BASE_URL = import.meta.env.VITE_SOCKET_URL;
 
 export const useAuthStore = create((set, get) => ({
   authUser: null,
@@ -12,7 +10,7 @@ export const useAuthStore = create((set, get) => ({
   isLoggingIn: false,
   isCheckingAuth: true,
   onlineUsers: [],
-  lastSeenMap: {}, // FIX: Added real-time tracker for offline times
+  lastSeenMap: {},
   socket: null,
 
   checkAuth: async () => {
@@ -25,6 +23,21 @@ export const useAuthStore = create((set, get) => ({
       set({ authUser: null });
     } finally {
       set({ isCheckingAuth: false });
+    }
+  },
+
+  // FIX: Added the missing signup function!
+  signup: async (data) => {
+    set({ isSigningUp: true });
+    try {
+      const res = await axiosInstance.post("/auth/signup", data);
+      set({ authUser: res.data });
+      toast.success("Account created successfully");
+      get().connectSocket(); // Connect them to real-time features instantly
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Signup failed");
+    } finally {
+      set({ isSigningUp: false });
     }
   },
 
@@ -57,13 +70,18 @@ export const useAuthStore = create((set, get) => ({
     const { authUser } = get();
     if (!authUser || get().socket?.connected) return;
 
-    const socket = io(BASE_URL, { query: { userId: authUser._id } });
+    const socket = io(BASE_URL, {
+      query: {
+        userId: authUser._id,
+      },
+      withCredentials: true,
+      transports: ["websocket", "polling"],
+    });
     socket.connect();
     set({ socket: socket });
 
     socket.on("getOnlineUsers", (users) => set({ onlineUsers: users }));
 
-    // FIX: Listen for when someone drops offline
     socket.on("userOffline", ({ userId, lastSeen }) => {
       set((state) => ({
         lastSeenMap: { ...state.lastSeenMap, [userId]: lastSeen },

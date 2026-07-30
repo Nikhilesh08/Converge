@@ -3,7 +3,7 @@ import { useChatStore } from "../store/useChatStore";
 import { useAuthStore } from "../store/useAuthStore";
 import SidebarSkeleton from "./skeletons/SidebarSkeleton";
 import CreateGroupModal from "./CreateGroupModal";
-import { Users, Search, Hash, Plus } from "lucide-react";
+import { Users, Search, Plus } from "lucide-react";
 
 const Sidebar = () => {
   const {
@@ -22,8 +22,6 @@ const Sidebar = () => {
   // Default to 288px (w-72)
   const [sidebarWidth, setSidebarWidth] = useState(288);
   const [isResizing, setIsResizing] = useState(false);
-
-  // FIX: Real-time window width tracking
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
 
   useEffect(() => {
@@ -31,7 +29,6 @@ const Sidebar = () => {
     getGroups();
   }, []);
 
-  // FIX: Listener to detect window resizing in real-time
   useEffect(() => {
     const handleResize = () => setWindowWidth(window.innerWidth);
     window.addEventListener("resize", handleResize);
@@ -84,10 +81,6 @@ const Sidebar = () => {
 
   return (
     <>
-      {/* FIX: 
-          1. Use the state-driven `windowWidth` to check if we are on desktop.
-          2. Added `flex-none` so the sidebar never shrinks below its assigned width.
-      */}
       <aside
         style={{ width: windowWidth >= 1024 ? sidebarWidth : undefined }}
         className="relative h-full w-20 flex-none lg:flex-shrink-0 border-r border-base-300 flex flex-col bg-base-100 z-10"
@@ -119,67 +112,170 @@ const Sidebar = () => {
           </div>
         </div>
 
-        <div className="overflow-y-auto w-full py-3 flex-1">
+        <div className="overflow-y-auto w-full py-3 flex-1 px-3">
+          {/* GROUPS SECTION */}
           {filteredGroups.length > 0 && (
-            <div className="px-5 py-2 text-xs font-semibold text-zinc-500 uppercase hidden lg:block">
+            <div className="px-2 py-2 text-xs font-semibold text-zinc-500 uppercase hidden lg:block">
               Groups
             </div>
           )}
-          {filteredGroups.map((group) => (
-            <button
-              key={group._id}
-              onClick={() => setSelectedUser(group)}
-              className={`w-full p-3 flex items-center gap-3 hover:bg-base-300 transition-colors ${selectedUser?._id === group._id ? "bg-base-300" : ""}`}
-            >
-              <div className="size-12 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                <Hash className="size-6 text-primary" />
-              </div>
-              <div className="hidden lg:block text-left min-w-0">
-                <div className="font-medium truncate">{group.name}</div>
-              </div>
-            </button>
-          ))}
+          <div className="space-y-1">
+            {filteredGroups.map((group) => {
+              const isActive = selectedUser?._id === group._id;
+              return (
+                <button
+                  key={group._id}
+                  onClick={() => setSelectedUser(group)}
+                  className={`w-full p-2 flex items-center gap-3 transition-colors rounded-xl ${
+                    isActive
+                      ? "bg-primary/10 border border-primary/20"
+                      : "hover:bg-base-200 border border-transparent"
+                  }`}
+                >
+                  {/* WhatsApp Style Circular Group Avatar */}
+                  <div className="relative shrink-0 mx-auto lg:mx-0">
+                    {group.groupPic ? (
+                      <img
+                        src={group.groupPic}
+                        alt={group.name}
+                        className="size-10 object-cover rounded-full ring-1 ring-base-300"
+                      />
+                    ) : (
+                      <div
+                        className={`size-10 rounded-full flex items-center justify-center transition-colors ${
+                          isActive
+                            ? "bg-primary/20 text-primary"
+                            : "bg-base-300 text-base-content/70 group-hover:bg-base-content/10"
+                        }`}
+                      >
+                        <Users className="size-5" />
+                      </div>
+                    )}
+                  </div>
 
-          <div className="px-5 py-2 mt-4 text-xs font-semibold text-zinc-500 uppercase hidden lg:block">
+                  <div className="hidden lg:flex flex-1 text-left min-w-0 overflow-hidden flex-col justify-center">
+                    <div className="flex justify-between items-center w-full">
+                      <h3
+                        className={`font-semibold text-sm truncate ${
+                          isActive
+                            ? "text-base-content"
+                            : "text-base-content/80"
+                        }`}
+                      >
+                        {group.name}
+                      </h3>
+                      {group.lastMessageTime && (
+                        <span className="text-[10px] text-base-content/40 pl-2 shrink-0">
+                          {new Date(group.lastMessageTime).toLocaleTimeString(
+                            [],
+                            {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            },
+                          )}
+                        </span>
+                      )}
+                    </div>
+                    <p
+                      className={`text-xs truncate mt-0.5 ${
+                        isActive
+                          ? "text-primary font-medium"
+                          : "text-base-content/50"
+                      }`}
+                    >
+                      {group.lastMessage || "No messages yet"}
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* DIRECT MESSAGES SECTION */}
+          <div className="px-2 py-2 mt-4 text-xs font-semibold text-zinc-500 uppercase hidden lg:block">
             Direct Messages
           </div>
-          {filteredUsers.length === 0 ? (
-            <div className="text-center text-zinc-500 py-4 hidden lg:block">
-              No contacts found
-            </div>
-          ) : (
-            filteredUsers.map((user) => (
-              <button
-                key={user._id}
-                onClick={() => setSelectedUser(user)}
-                className={`w-full p-3 flex items-center gap-3 hover:bg-base-300 transition-colors ${selectedUser?._id === user._id ? "bg-base-300" : ""}`}
-              >
-                <div className="relative mx-auto lg:mx-0 shrink-0">
-                  <img
-                    src={user.profilePic || "/avatar.png"}
-                    alt={user.name}
-                    className="size-12 object-cover rounded-full"
-                  />
-                  {onlineUsers.includes(user._id) && (
-                    <span className="absolute bottom-0 right-0 size-3 bg-green-500 rounded-full ring-2 ring-zinc-900" />
-                  )}
-                </div>
-                <div className="hidden lg:block text-left min-w-0">
-                  <div className="font-medium truncate">{user.fullName}</div>
-                  <div className="text-xs text-zinc-400">
-                    {onlineUsers.includes(user._id) ? "Online" : "Offline"}
-                  </div>
-                </div>
-              </button>
-            ))
-          )}
+          <div className="space-y-1">
+            {filteredUsers.length === 0 ? (
+              <div className="text-center text-zinc-500 py-4 hidden lg:block text-sm">
+                No contacts found
+              </div>
+            ) : (
+              filteredUsers.map((user) => {
+                const isActive = selectedUser?._id === user._id;
+                const isOnline = onlineUsers.includes(user._id);
+                // Check if the date is valid (not 1970 fallback)
+                const hasValidTime =
+                  user.lastMessageTime &&
+                  new Date(user.lastMessageTime).getTime() > 0;
+
+                return (
+                  <button
+                    key={user._id}
+                    onClick={() => setSelectedUser(user)}
+                    className={`w-full p-2 flex items-center gap-3 transition-colors rounded-xl ${
+                      isActive
+                        ? "bg-primary/10 border border-primary/20"
+                        : "hover:bg-base-200 border border-transparent"
+                    }`}
+                  >
+                    <div className="relative mx-auto lg:mx-0 shrink-0">
+                      <img
+                        src={user.profilePic || "/avatar.png"}
+                        alt={user.name}
+                        className="size-10 object-cover rounded-full"
+                      />
+                      {isOnline && (
+                        <span className="absolute bottom-0 right-0 size-2.5 bg-green-500 rounded-full ring-2 ring-base-100" />
+                      )}
+                    </div>
+                    <div className="hidden lg:flex flex-1 text-left min-w-0 overflow-hidden flex-col justify-center">
+                      <div className="flex justify-between items-center w-full">
+                        <h3
+                          className={`font-semibold text-sm truncate ${
+                            isActive
+                              ? "text-base-content"
+                              : "text-base-content/80"
+                          }`}
+                        >
+                          {user.fullName}
+                        </h3>
+                        {hasValidTime && (
+                          <span className="text-[10px] text-base-content/40 pl-2 shrink-0">
+                            {new Date(user.lastMessageTime).toLocaleTimeString(
+                              [],
+                              {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              },
+                            )}
+                          </span>
+                        )}
+                      </div>
+                      <p
+                        className={`text-xs truncate mt-0.5 ${
+                          isActive
+                            ? "text-primary font-medium"
+                            : "text-base-content/50"
+                        }`}
+                      >
+                        {user.lastMessage || "No messages yet"}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
         </div>
 
         {/* Drag Handle - Only render on large screens */}
         {windowWidth >= 1024 && (
           <div
             onMouseDown={startResizing}
-            className={`absolute top-0 right-0 w-1.5 h-full cursor-col-resize z-20 transition-colors hover:bg-primary/50 ${isResizing ? "bg-primary/50" : ""}`}
+            className={`absolute top-0 right-0 w-1.5 h-full cursor-col-resize z-20 transition-colors hover:bg-primary/50 ${
+              isResizing ? "bg-primary/50" : ""
+            }`}
             title="Drag to resize"
           />
         )}

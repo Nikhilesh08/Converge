@@ -47,13 +47,42 @@ export const getUsersForSidebar = async (req, res) => {
   }
 };
 
+// FIX: Strictly updated ONLY this function to attach the last message for your new Sidebar UI
 export const getGroups = async (req, res) => {
   try {
-    const groups = await Group.find({ members: req.user._id }).populate(
+    const loggedInUserId = req.user._id;
+    const groups = await Group.find({ members: loggedInUserId }).populate(
       "members",
       "fullName profilePic",
     );
-    res.status(200).json(groups);
+
+    const groupsWithMetadata = await Promise.all(
+      groups.map(async (group) => {
+        const lastMessage = await Message.findOne({ groupId: group._id }).sort({
+          createdAt: -1,
+        });
+
+        return {
+          ...group.toObject(),
+          lastMessage: lastMessage
+            ? lastMessage.image
+              ? "📷 Photo"
+              : lastMessage.text
+            : "No messages yet",
+          lastMessageTime: lastMessage
+            ? lastMessage.createdAt
+            : group.createdAt,
+        };
+      }),
+    );
+
+    res
+      .status(200)
+      .json(
+        groupsWithMetadata.sort(
+          (a, b) => new Date(b.lastMessageTime) - new Date(a.lastMessageTime),
+        ),
+      );
   } catch (error) {
     console.error("Error in getGroups:", error.message);
     res.status(500).json({ error: "Internal server error" });
@@ -105,13 +134,32 @@ export const getMessages = async (req, res) => {
 
 export const sendMessage = async (req, res) => {
   try {
-    const { text, image } = req.body;
+    const { text, image, audio, document, fileName } = req.body;
     const { id: targetId } = req.params;
     const senderId = req.user._id;
 
+    // Upload Image
     let imageUrl = image
       ? (await cloudinary.uploader.upload(image)).secure_url
       : null;
+
+    // Upload Audio (Voice Notes) - Cloudinary uses resource_type: "video" for audio
+    let audioUrl = audio
+      ? (await cloudinary.uploader.upload(audio, { resource_type: "video" }))
+          .secure_url
+      : null;
+
+    // Upload Document (PDFs, Docs) - Cloudinary uses resource_type: "raw" for generic files
+    let documentUrl = document
+      ? (await cloudinary.uploader.upload(document, { resource_type: "raw" }))
+          .secure_url
+      : null;
+
+    // Determine message type based on payload
+    let msgType = "text";
+    if (imageUrl) msgType = "image";
+    if (audioUrl) msgType = "audio";
+    if (documentUrl) msgType = "document";
 
     const targetGroup = await Group.findById(targetId);
 
@@ -119,9 +167,12 @@ export const sendMessage = async (req, res) => {
       senderId,
       text,
       image: imageUrl,
+      audio: audioUrl,
+      document: documentUrl,
+      fileName: fileName || null,
       groupId: targetGroup ? targetId : null,
       receiverId: targetGroup ? null : targetId,
-      messageType: "text",
+      messageType: msgType,
     });
 
     await newMessage.save();
@@ -460,19 +511,16 @@ export const deleteMessage = async (req, res) => {
   }
 };
 
-// FIX: New controller to handle the Blue Tick (Read Receipt) logic
 export const markMessagesAsSeen = async (req, res) => {
   try {
     const { id: otherUserId } = req.params;
     const myId = req.user._id;
 
-    // 1. Find all unread messages sent BY the other person TO you, and update them
     await Message.updateMany(
       { senderId: otherUserId, receiverId: myId, isSeen: false },
       { $set: { isSeen: true } },
     );
 
-    // 2. Blast a socket event to the other person's phone so their UI instantly turns blue
     const senderSocketId = getReceiverSocketId(otherUserId);
     if (senderSocketId) {
       io.to(senderSocketId).emit("messagesSeen", { readerId: myId });

@@ -18,7 +18,8 @@ const messageSchema = new mongoose.Schema(
     },
     messageType: {
       type: String,
-      enum: ["text", "image", "system"],
+      // FIX: Expanded to accept audio and document types
+      enum: ["text", "image", "audio", "document", "system"],
       default: "text",
     },
     text: {
@@ -27,11 +28,19 @@ const messageSchema = new mongoose.Schema(
     image: {
       type: String,
     },
+    audio: {
+      type: String, // URL for voice notes
+    },
+    document: {
+      type: String, // URL for PDFs/Docs
+    },
+    fileName: {
+      type: String, // To display the original document name (e.g., "resume.pdf")
+    },
     isSeen: {
       type: Boolean,
       default: false,
     },
-    // FIX: Added reactions array
     reactions: [
       {
         userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
