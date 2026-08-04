@@ -46,7 +46,18 @@ export const useCallStore = create((set, get) => ({
     const socket = useAuthStore.getState().socket;
 
     peerConnection = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "stun:stun1.l.google.com:19302" },
+        // TURN relay fallback: required when STUN can't punch through
+        // (symmetric NAT, corporate/school wifi, most cloud hosting).
+        // Replace with your own TURN credentials (e.g. Metered, Twilio, coturn).
+        {
+          urls: import.meta.env.VITE_TURN_URL || "turn:openrelay.metered.ca:80",
+          username: import.meta.env.VITE_TURN_USERNAME || "openrelayproject",
+          credential: import.meta.env.VITE_TURN_CREDENTIAL || "openrelayproject",
+        },
+      ],
     });
 
     if (localStream) {
