@@ -5,6 +5,20 @@ import toast from "react-hot-toast";
 let peerConnection = null;
 let localStream = null;
 let dataChannel = null;
+let pendingIceCandidates = [];
+
+const flushPendingIceCandidates = async () => {
+  if (!peerConnection) return;
+  const queued = pendingIceCandidates;
+  pendingIceCandidates = [];
+  for (const candidate of queued) {
+    try {
+      await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (err) {
+      console.error("Failed to add queued ICE candidate:", err);
+    }
+  }
+};
 
 export const useCallStore = create((set, get) => ({
   callState: "idle",
@@ -25,15 +39,35 @@ export const useCallStore = create((set, get) => ({
       set({ callState: "ringing", callerInfo: { id: from, name, signal } });
     });
 
-    socket.on("callAccepted", (signal) => {
+    socket.on("callAccepted", async (signal) => {
       set({ callState: "active" });
-      if (peerConnection)
-        peerConnection.setRemoteDescription(new RTCSessionDescription(signal));
+      if (peerConnection) {
+        try {
+          await peerConnection.setRemoteDescription(
+            new RTCSessionDescription(signal),
+          );
+          await flushPendingIceCandidates();
+        } catch (err) {
+          console.error("Failed to set remote description:", err);
+        }
+      }
     });
 
-    socket.on("iceCandidate", (candidate) => {
-      if (peerConnection)
-        peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    socket.on("iceCandidate", async (candidate) => {
+      if (!peerConnection) return;
+      // Buffer candidates that arrive before the remote description is set,
+      // otherwise addIceCandidate throws and the candidate is silently lost —
+      // this is what causes calls to connect (state = "active") but never
+      // actually deliver audio/video.
+      if (peerConnection.remoteDescription && peerConnection.remoteDescription.type) {
+        try {
+          await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (err) {
+          console.error("Failed to add ICE candidate:", err);
+        }
+      } else {
+        pendingIceCandidates.push(candidate);
+      }
     });
 
     socket.on("callEnded", () => {
@@ -44,6 +78,7 @@ export const useCallStore = create((set, get) => ({
 
   setupPeerConnection: (partnerId, isInitiator) => {
     const socket = useAuthStore.getState().socket;
+    pendingIceCandidates = [];
 
     peerConnection = new RTCPeerConnection({
       iceServers: [
@@ -153,6 +188,7 @@ export const useCallStore = create((set, get) => ({
       await peerConnection.setRemoteDescription(
         new RTCSessionDescription(callerInfo.signal),
       );
+      await flushPendingIceCandidates();
 
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
@@ -238,6 +274,7 @@ export const useCallStore = create((set, get) => ({
     peerConnection = null;
     localStream = null;
     dataChannel = null;
+    pendingIceCandidates = [];
 
     set({
       callState: "idle",
