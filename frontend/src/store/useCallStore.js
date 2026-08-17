@@ -5,7 +5,6 @@ import toast from "react-hot-toast";
 let peerConnection = null;
 let localStream = null;
 let dataChannel = null;
-// FIX: Queue to hold ICE candidates that arrive before the connection is ready
 let pendingIceCandidates = [];
 
 export const useCallStore = create((set, get) => ({
@@ -21,7 +20,6 @@ export const useCallStore = create((set, get) => ({
     const socket = useAuthStore.getState().socket;
     if (!socket) return;
 
-    // FIX: Remove existing listeners before adding new ones to prevent React remount duplication
     socket.off("callUser");
     socket.off("callAccepted");
     socket.off("iceCandidate");
@@ -38,7 +36,6 @@ export const useCallStore = create((set, get) => ({
           new RTCSessionDescription(signal),
         );
 
-        // FIX: Process any ICE candidates that were queued while we were waiting for the answer
         pendingIceCandidates.forEach((candidate) => {
           peerConnection
             .addIceCandidate(new RTCIceCandidate(candidate))
@@ -49,7 +46,6 @@ export const useCallStore = create((set, get) => ({
     });
 
     socket.on("iceCandidate", async (candidate) => {
-      // FIX: If remote description is set, add candidate. Otherwise, queue it up!
       if (peerConnection && peerConnection.remoteDescription) {
         try {
           await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
@@ -70,14 +66,12 @@ export const useCallStore = create((set, get) => ({
   setupPeerConnection: (partnerId, isInitiator) => {
     const socket = useAuthStore.getState().socket;
 
-    // FIX: Added robust STUN servers for production NAT traversal
     const iceServers = [
       { urls: "stun:stun.l.google.com:19302" },
       { urls: "stun:stun1.l.google.com:19302" },
       { urls: "stun:stun2.l.google.com:19302" },
     ];
 
-    // Optional: Prepare for production TURN server (inject via Vite ENV)
     if (import.meta.env.VITE_TURN_URL) {
       iceServers.push({
         urls: import.meta.env.VITE_TURN_URL,
@@ -148,7 +142,6 @@ export const useCallStore = create((set, get) => ({
         isVideoOn: true,
       });
 
-      // Clear old queued candidates
       pendingIceCandidates = [];
       get().setupPeerConnection(targetUser._id, true);
 
@@ -185,7 +178,6 @@ export const useCallStore = create((set, get) => ({
         new RTCSessionDescription(callerInfo.signal),
       );
 
-      // FIX: Process any ICE candidates that were queued while ringing
       pendingIceCandidates.forEach((candidate) => {
         peerConnection
           .addIceCandidate(new RTCIceCandidate(candidate))
@@ -276,7 +268,6 @@ export const useCallStore = create((set, get) => ({
       peerConnection.close();
     }
 
-    // FIX: Clear state fully
     peerConnection = null;
     localStream = null;
     dataChannel = null;
