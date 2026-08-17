@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { axiosInstance } from "../lib/axios";
 import { io } from "socket.io-client";
-import { useCallStore } from "./useCallStore"; // NEW: Import call store
+import { useCallStore } from "./useCallStore";
 import toast from "react-hot-toast";
 
 const BASE_URL = import.meta.env.VITE_SOCKET_URL;
@@ -71,20 +71,19 @@ export const useAuthStore = create((set, get) => ({
     const { authUser } = get();
     if (!authUser || get().socket?.connected) return;
 
-    // FIX: Added secure: true for Vercel production HTTPS environments
+    // FIX: Removed the forced transports array.
+    // Socket.io will now safely use HTTP polling first, then upgrade to WSS, bypassing Render's 503 proxy blocks.
     const socket = io(BASE_URL, {
       query: {
         userId: authUser._id,
       },
       withCredentials: true,
-      transports: ["websocket", "polling"],
       secure: true,
     });
 
     socket.connect();
     set({ socket: socket });
 
-    // FIX: Initialize WebRTC event listeners immediately after socket connects
     useCallStore.getState().initWebRTCListeners();
 
     socket.on("getOnlineUsers", (users) => set({ onlineUsers: users }));
