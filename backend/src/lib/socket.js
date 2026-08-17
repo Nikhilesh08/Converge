@@ -6,12 +6,41 @@ import User from "../models/user.model.js";
 const app = express();
 const server = http.createServer(app);
 
-// UPDATED: Dynamic CORS configuration for production readiness
+// FIX: Safely strip trailing slashes for Socket.IO origin checks as well
+const parseAllowedOrigins = () =>
+  (process.env.CLIENT_URL || process.env.FRONTEND_URL || "")
+    .split(",")
+    .map((value) => value.trim().replace(/\/$/, ""))
+    .filter(Boolean);
+
+const isAllowedOrigin = (origin) => {
+  if (!origin) return true;
+
+  const allowedOrigins = parseAllowedOrigins();
+  return (
+    allowedOrigins.includes(origin) ||
+    origin === "http://localhost:5173" ||
+    origin === "http://localhost:3000" ||
+    origin === "http://127.0.0.1:5173"
+  );
+};
+
 const io = new Server(server, {
   cors: {
-    origin: process.env.CLIENT_URL,
+    origin: (origin, callback) => {
+      if (!origin || isAllowedOrigin(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error(`Origin ${origin} is not allowed by Socket.IO CORS`));
+    },
     credentials: true,
   },
+});
+
+io.engine.on("connection_error", (err) => {
+  console.error("Socket.IO connection error:", err.message);
 });
 
 const userSocketMap = {};
@@ -26,7 +55,9 @@ export function isUserActiveInChat(userId, chatTargetId) {
 }
 
 io.on("connection", (socket) => {
-  const userId = socket.handshake.query.userId;
+  const rawUserId = socket.handshake.query.userId;
+  const userId = Array.isArray(rawUserId) ? rawUserId[0] : rawUserId;
+
   if (userId && userId !== "undefined") {
     userSocketMap[userId] = socket.id;
   }
@@ -53,7 +84,7 @@ io.on("connection", (socket) => {
   });
 
   // ==========================================
-  // --- WEBRTC SIGNALING (PHASE 1 ADDITIONS) ---
+  // --- WEBRTC SIGNALING ---
   // ==========================================
   socket.on("callUser", ({ userToCall, signalData, from, name }) => {
     const receiverSocketId = getReceiverSocketId(userToCall);
@@ -82,7 +113,7 @@ io.on("connection", (socket) => {
   });
 
   // ==========================================
-  // --- TYPING INDICATORS (NEW) ---
+  // --- TYPING INDICATORS ---
   // ==========================================
   socket.on("typing", ({ receiverId, groupId }) => {
     if (groupId) {

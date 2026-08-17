@@ -1,7 +1,9 @@
 import { create } from "zustand";
 import { axiosInstance } from "../lib/axios";
 import { io } from "socket.io-client";
+import { useCallStore } from "./useCallStore"; // NEW: Import call store
 import toast from "react-hot-toast";
+
 const BASE_URL = import.meta.env.VITE_SOCKET_URL;
 
 export const useAuthStore = create((set, get) => ({
@@ -26,14 +28,13 @@ export const useAuthStore = create((set, get) => ({
     }
   },
 
-  // FIX: Added the missing signup function!
   signup: async (data) => {
     set({ isSigningUp: true });
     try {
       const res = await axiosInstance.post("/auth/signup", data);
       set({ authUser: res.data });
       toast.success("Account created successfully");
-      get().connectSocket(); // Connect them to real-time features instantly
+      get().connectSocket();
     } catch (error) {
       toast.error(error.response?.data?.message || "Signup failed");
     } finally {
@@ -70,15 +71,21 @@ export const useAuthStore = create((set, get) => ({
     const { authUser } = get();
     if (!authUser || get().socket?.connected) return;
 
+    // FIX: Added secure: true for Vercel production HTTPS environments
     const socket = io(BASE_URL, {
       query: {
         userId: authUser._id,
       },
       withCredentials: true,
       transports: ["websocket", "polling"],
+      secure: true,
     });
+
     socket.connect();
     set({ socket: socket });
+
+    // FIX: Initialize WebRTC event listeners immediately after socket connects
+    useCallStore.getState().initWebRTCListeners();
 
     socket.on("getOnlineUsers", (users) => set({ onlineUsers: users }));
 
