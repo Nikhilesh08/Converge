@@ -6,7 +6,7 @@ import User from "../models/user.model.js";
 const app = express();
 const server = http.createServer(app);
 
-// FIX: Safely strip trailing slashes for Socket.IO origin checks as well
+// Safely strip trailing slashes for Socket.IO origin checks
 const parseAllowedOrigins = () =>
   (process.env.CLIENT_URL || process.env.FRONTEND_URL || "")
     .split(",")
@@ -32,7 +32,6 @@ const io = new Server(server, {
         callback(null, true);
         return;
       }
-
       callback(new Error(`Origin ${origin} is not allowed by Socket.IO CORS`));
     },
     credentials: true,
@@ -62,20 +61,24 @@ io.on("connection", (socket) => {
     userSocketMap[userId] = socket.id;
   }
 
+  // Broadcast the master list immediately upon any connection
   io.emit("getOnlineUsers", Object.keys(userSocketMap));
 
   socket.on("joinChat", (partnerId) => {
     if (userId) userActiveChat[userId] = partnerId;
   });
+
   socket.on("leaveChat", () => {
     if (userId) delete userActiveChat[userId];
   });
+
   socket.on("joinGroup", (groupId) => {
     if (userId) {
       socket.join(groupId);
       userActiveChat[userId] = groupId;
     }
   });
+
   socket.on("leaveGroup", (groupId) => {
     if (userId) {
       socket.leave(groupId);
@@ -88,12 +91,13 @@ io.on("connection", (socket) => {
   // ==========================================
   socket.on("callUser", ({ userToCall, signalData, from, name }) => {
     const receiverSocketId = getReceiverSocketId(userToCall);
-    if (receiverSocketId)
+    if (receiverSocketId) {
       io.to(receiverSocketId).emit("callUser", {
         signal: signalData,
         from,
         name,
       });
+    }
   });
 
   socket.on("answerCall", (data) => {
@@ -103,8 +107,9 @@ io.on("connection", (socket) => {
 
   socket.on("iceCandidate", ({ to, candidate }) => {
     const receiverSocketId = getReceiverSocketId(to);
-    if (receiverSocketId)
+    if (receiverSocketId) {
       io.to(receiverSocketId).emit("iceCandidate", candidate);
+    }
   });
 
   socket.on("endCall", ({ to }) => {
@@ -134,21 +139,27 @@ io.on("connection", (socket) => {
         io.to(receiverSocketId).emit("userStoppedTyping", { userId });
     }
   });
-  // ==========================================
 
+  // ==========================================
+  // --- DISCONNECT (THE ARCHITECTURAL FIX) ---
+  // ==========================================
   socket.on("disconnect", async () => {
     if (userId) {
-      delete userSocketMap[userId];
-      delete userActiveChat[userId];
+      // Strict Ownership Check: Only modify state if this dying socket is the current session.
+      if (userSocketMap[userId] === socket.id) {
+        delete userSocketMap[userId];
+        delete userActiveChat[userId];
 
-      try {
-        const lastSeenDate = new Date();
-        await User.findByIdAndUpdate(userId, { lastSeen: lastSeenDate });
-        io.emit("userOffline", { userId, lastSeen: lastSeenDate });
-      } catch (error) {
-        console.error("Error updating last seen:", error);
+        try {
+          const lastSeenDate = new Date();
+          await User.findByIdAndUpdate(userId, { lastSeen: lastSeenDate });
+          io.emit("userOffline", { userId, lastSeen: lastSeenDate });
+        } catch (error) {
+          console.error("Error updating last seen:", error);
+        }
       }
     }
+    // Always broadcast the source of truth to all clients
     io.emit("getOnlineUsers", Object.keys(userSocketMap));
   });
 });
