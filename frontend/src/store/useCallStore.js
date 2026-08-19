@@ -36,10 +36,13 @@ export const useCallStore = create((set, get) => ({
           new RTCSessionDescription(signal),
         );
 
+        // FIX: Prevent crashing if connection closed right as call is accepted
         pendingIceCandidates.forEach((candidate) => {
-          peerConnection
-            .addIceCandidate(new RTCIceCandidate(candidate))
-            .catch((e) => console.error(e));
+          if (peerConnection.signalingState !== "closed") {
+            peerConnection
+              .addIceCandidate(new RTCIceCandidate(candidate))
+              .catch((e) => console.error("Ignored stale ICE candidate", e));
+          }
         });
         pendingIceCandidates = [];
       }
@@ -178,10 +181,13 @@ export const useCallStore = create((set, get) => ({
         new RTCSessionDescription(callerInfo.signal),
       );
 
+      // FIX: Prevent crashing if connection closed right as call is answered
       pendingIceCandidates.forEach((candidate) => {
-        peerConnection
-          .addIceCandidate(new RTCIceCandidate(candidate))
-          .catch((e) => console.error(e));
+        if (peerConnection && peerConnection.signalingState !== "closed") {
+          peerConnection
+            .addIceCandidate(new RTCIceCandidate(candidate))
+            .catch((e) => console.error("Ignored stale ICE candidate", e));
+        }
       });
       pendingIceCandidates = [];
 

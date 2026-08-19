@@ -47,7 +47,6 @@ export const getUsersForSidebar = async (req, res) => {
   }
 };
 
-// FIX: Strictly updated ONLY this function to attach the last message for your new Sidebar UI
 export const getGroups = async (req, res) => {
   try {
     const loggedInUserId = req.user._id;
@@ -176,7 +175,9 @@ export const sendMessage = async (req, res) => {
     });
 
     await newMessage.save();
-    const populatedMessage = await newMessage.populate(
+
+    // FIX: Properly query and populate the message to guarantee senderId is an object
+    const populatedMessage = await Message.findById(newMessage._id).populate(
       "senderId",
       "fullName profilePic",
     );

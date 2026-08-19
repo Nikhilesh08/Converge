@@ -74,11 +74,9 @@ export const useChatStore = create((set, get) => ({
     }
   },
 
-  // FIX: New action to tell the server we saw the messages
   markAsSeen: async (userId) => {
     try {
       await axiosInstance.put(`/messages/mark-seen/${userId}`);
-      // Optimistically update UI
       set({
         messages: get().messages.map((msg) =>
           !msg.isSeen &&
@@ -219,6 +217,9 @@ export const useChatStore = create((set, get) => ({
     const authUser = useAuthStore.getState().authUser;
     if (!socket) return;
 
+    // FIX: Nuke existing listeners to prevent duplicate message rendering
+    get().unsubscribeFromMessages();
+
     socket.on("newMessage", (newMessage) => {
       const { selectedUser } = get();
       if (selectedUser?._id === newMessage.senderId._id) {
@@ -245,7 +246,6 @@ export const useChatStore = create((set, get) => ({
       set({ messages: get().messages.filter((msg) => msg._id !== messageId) });
     });
 
-    // FIX: Listen for when the other person opens the chat
     socket.on("messagesSeen", ({ readerId }) => {
       const { selectedUser, messages } = get();
       if (selectedUser?._id === readerId) {
@@ -335,7 +335,7 @@ export const useChatStore = create((set, get) => ({
       socket.off("newGroupMessage");
       socket.off("messageReaction");
       socket.off("messageDeleted");
-      socket.off("messagesSeen"); // FIX: Clean up
+      socket.off("messagesSeen");
       socket.off("userTyping");
       socket.off("userStoppedTyping");
       socket.off("newGroupCreated");

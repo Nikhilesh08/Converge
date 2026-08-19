@@ -21,10 +21,10 @@ const ChatContainer = () => {
     hasMore,
     isLoadingMore,
     loadMoreMessages,
-    markAsSeen, // FIX: Extracted markAsSeen function
+    markAsSeen,
   } = useChatStore();
 
-  const { authUser, onlineUsers } = useAuthStore(); // FIX: Extracted onlineUsers
+  const { authUser, onlineUsers } = useAuthStore();
   const messageEndRef = useRef(null);
   const observerTarget = useRef(null);
   const [activePickerId, setActivePickerId] = useState(null);
@@ -41,11 +41,9 @@ const ChatContainer = () => {
     unsubscribeFromMessages,
   ]);
 
-  // FIX: Auto-mark unread messages as seen when the chat opens
   useEffect(() => {
     if (!messages || messages.length === 0) return;
 
-    // Find unread messages sent by the other person
     const unreadMessages = messages.filter(
       (m) =>
         !m.isSeen &&
@@ -156,7 +154,6 @@ const ChatContainer = () => {
     );
   }
 
-  // Check if the current chat is a group, and if the user is online
   const isGroupChat = !!selectedUser.members;
   const isOnline = onlineUsers.includes(selectedUser._id);
 
@@ -220,7 +217,6 @@ const ChatContainer = () => {
                   <time className="text-xs opacity-50">
                     {formatMessageTime(message.createdAt)}
                   </time>
-                  {/* FIX: WhatsApp Style Ticks UI */}
                   {isMyMessage && (
                     <span className="ml-1">
                       {message.isSeen ? (

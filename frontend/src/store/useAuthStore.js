@@ -61,6 +61,10 @@ export const useAuthStore = create((set, get) => ({
       await axiosInstance.post("/auth/logout");
       set({ authUser: null });
       get().disconnectSocket();
+
+      // FIX: Aggressively wipe global WebRTC variables on logout
+      useCallStore.getState().endCall(false);
+
       toast.success("Logged out");
     } catch (error) {
       toast.error("Logout failed");
@@ -81,7 +85,6 @@ export const useAuthStore = create((set, get) => ({
     socket.connect();
     set({ socket: socket });
 
-    // FIX: Lock the listeners onto the socket immediately after connection
     useCallStore.getState().initWebRTCListeners();
 
     socket.on("getOnlineUsers", (users) => set({ onlineUsers: users }));
