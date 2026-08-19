@@ -66,13 +66,10 @@ export const useAuthStore = create((set, get) => ({
       toast.error("Logout failed");
     }
   },
-
   connectSocket: () => {
     const { authUser } = get();
     if (!authUser || get().socket?.connected) return;
 
-    // FIX: Removed the forced transports array.
-    // Socket.io will now safely use HTTP polling first, then upgrade to WSS, bypassing Render's 503 proxy blocks.
     const socket = io(BASE_URL, {
       query: {
         userId: authUser._id,
@@ -84,6 +81,7 @@ export const useAuthStore = create((set, get) => ({
     socket.connect();
     set({ socket: socket });
 
+    // FIX: Lock the listeners onto the socket immediately after connection
     useCallStore.getState().initWebRTCListeners();
 
     socket.on("getOnlineUsers", (users) => set({ onlineUsers: users }));

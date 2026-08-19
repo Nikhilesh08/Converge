@@ -25,11 +25,6 @@ const App = () => {
   }, [checkAuth]);
 
   // FIX: Start listening for incoming calls as soon as the user logs in and socket connects
-  useEffect(() => {
-    if (authUser) {
-      initWebRTCListeners();
-    }
-  }, [authUser, initWebRTCListeners]);
 
   if (isCheckingAuth && !authUser)
     return (
