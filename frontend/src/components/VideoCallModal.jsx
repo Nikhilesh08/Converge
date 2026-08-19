@@ -29,18 +29,32 @@ const VideoCallModal = () => {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
 
+  // Attach local / screen sharing stream and force browser playback
   useEffect(() => {
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = screenStream || localStream;
+    if (localVideoRef.current && (localStream || screenStream)) {
+      const streamToPlay = screenStream || localStream;
+
+      // Only assign if different to prevent the stream from flashing black
+      if (localVideoRef.current.srcObject !== streamToPlay) {
+        localVideoRef.current.srcObject = streamToPlay;
+      }
+
+      // Force the browser to resume playing when the element unhides
+      if (isVideoOn || screenStream) {
+        localVideoRef.current.play().catch((error) => {
+          console.warn("Browser blocked local video resume:", error);
+        });
+      }
     }
-  }, [localStream, screenStream, callState]);
+  }, [localStream, screenStream, callState, isVideoOn]);
+
+  // Attach remote stream & bypass mobile/desktop autoplay policies
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
-      // Force play to bypass strict mobile/desktop autoplay blocking
       remoteVideoRef.current.play().catch((error) => {
         console.warn(
-          "Browser autoplay policy blocked audio/video. The user must interact with the screen.",
+          "Browser autoplay policy blocked audio/video. User interaction required:",
           error,
         );
       });
@@ -59,7 +73,7 @@ const VideoCallModal = () => {
               <Video className="size-10 text-primary" />
             </div>
             <h2 className="text-2xl font-bold text-white mb-2">
-              {callerInfo.name} is calling...
+              {callerInfo?.name} is calling...
             </h2>
             <div className="flex gap-4 justify-center mt-8">
               <button
@@ -82,7 +96,7 @@ const VideoCallModal = () => {
         {callState === "calling" && (
           <div className="text-center">
             <h2 className="text-2xl font-bold text-white mb-2">
-              Calling {callerInfo.fullName}...
+              Calling {callerInfo?.fullName || callerInfo?.name}...
             </h2>
             <p className="text-zinc-400 mb-8">Waiting for them to pick up</p>
             <button
@@ -106,34 +120,41 @@ const VideoCallModal = () => {
 
             {/* Local Video Preview */}
             <div className="absolute bottom-6 right-6 w-48 aspect-video bg-black rounded-lg overflow-hidden border-2 border-zinc-700 shadow-xl">
-              {/* FIX: WhatsApp-style Persistent Mute Indicator Overlay */}
+              {/* Persistent Mute Indicator Overlay */}
               {!isMicOn && (
                 <div className="absolute top-2 right-2 z-10 bg-black/70 p-1.5 rounded-full shadow-lg backdrop-blur-md">
                   <MicOff className="size-4 text-error" />
                 </div>
               )}
 
-              {/* If video is off, show a black screen with an icon. Otherwise, show the video feed. */}
-              {!isVideoOn && !screenStream ? (
-                <div className="w-full h-full flex items-center justify-center bg-zinc-800 relative z-0">
+              {/* Video Off Placeholder Overlay */}
+              {!isVideoOn && !screenStream && (
+                <div className="absolute inset-0 w-full h-full flex items-center justify-center bg-zinc-800 z-10">
                   <VideoOff className="size-8 text-zinc-500" />
                 </div>
-              ) : (
-                <video
-                  ref={localVideoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className={`w-full h-full object-cover relative z-0 ${!screenStream ? "mirror" : ""}`}
-                />
               )}
+
+              {/* Kept permanently mounted to avoid losing stream reference */}
+              <video
+                ref={localVideoRef}
+                autoPlay
+                playsInline
+                muted
+                className={`w-full h-full object-cover relative z-0 ${!screenStream ? "mirror" : ""} ${
+                  !isVideoOn && !screenStream ? "hidden" : "block"
+                }`}
+              />
             </div>
 
             {/* Controls */}
             <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-3 bg-black/60 p-3 rounded-full backdrop-blur-md">
               <button
                 onClick={toggleMic}
-                className={`btn btn-circle ${isMicOn ? "btn-ghost text-white hover:bg-white/20" : "btn-error text-white"}`}
+                className={`btn btn-circle ${
+                  isMicOn
+                    ? "btn-ghost text-white hover:bg-white/20"
+                    : "btn-error text-white"
+                }`}
                 title={isMicOn ? "Mute Microphone" : "Unmute Microphone"}
               >
                 {isMicOn ? (
@@ -145,7 +166,11 @@ const VideoCallModal = () => {
 
               <button
                 onClick={toggleVideo}
-                className={`btn btn-circle ${isVideoOn ? "btn-ghost text-white hover:bg-white/20" : "btn-error text-white"}`}
+                className={`btn btn-circle ${
+                  isVideoOn
+                    ? "btn-ghost text-white hover:bg-white/20"
+                    : "btn-error text-white"
+                }`}
                 title={isVideoOn ? "Turn Off Camera" : "Turn On Camera"}
               >
                 {isVideoOn ? (
@@ -157,7 +182,11 @@ const VideoCallModal = () => {
 
               <button
                 onClick={toggleScreenShare}
-                className={`btn btn-circle ${screenStream ? "btn-primary" : "btn-ghost text-white hover:bg-white/20"}`}
+                className={`btn btn-circle ${
+                  screenStream
+                    ? "btn-primary"
+                    : "btn-ghost text-white hover:bg-white/20"
+                }`}
                 title="Share Screen"
               >
                 <MonitorUp className="size-5" />
