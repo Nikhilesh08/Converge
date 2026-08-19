@@ -34,10 +34,17 @@ const VideoCallModal = () => {
       localVideoRef.current.srcObject = screenStream || localStream;
     }
   }, [localStream, screenStream, callState]);
-
   useEffect(() => {
-    if (remoteVideoRef.current && remoteStream)
+    if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
+      // Force play to bypass strict mobile/desktop autoplay blocking
+      remoteVideoRef.current.play().catch((error) => {
+        console.warn(
+          "Browser autoplay policy blocked audio/video. The user must interact with the screen.",
+          error,
+        );
+      });
+    }
   }, [remoteStream, callState]);
 
   if (callState === "idle") return null;
