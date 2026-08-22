@@ -77,6 +77,7 @@ export const useChatStore = create((set, get) => ({
   markAsSeen: async (userId) => {
     try {
       await axiosInstance.put(`/messages/mark-seen/${userId}`);
+
       set({
         messages: get().messages.map((msg) =>
           !msg.isSeen &&
@@ -85,20 +86,72 @@ export const useChatStore = create((set, get) => ({
             : msg,
         ),
       });
+
+      set((state) => ({
+        users: state.users.map((u) =>
+          u._id === userId ? { ...u, unreadCount: 0 } : u,
+        ),
+      }));
     } catch (error) {
       console.error("Failed to mark messages as seen");
     }
   },
 
   sendMessage: async (messageData) => {
-    const { selectedUser, messages } = get();
+    const { selectedUser, messages, users, groups } = get();
+    const authUser = useAuthStore.getState().authUser;
     if (!selectedUser) return;
     try {
       const res = await axiosInstance.post(
         `/messages/send/${selectedUser._id}`,
         messageData,
       );
-      set({ messages: [...messages, res.data] });
+
+      const newMsg = res.data;
+      set({ messages: [...messages, newMsg] });
+
+      if (selectedUser.members) {
+        const updatedGroups = groups
+          .map((g) =>
+            g._id === selectedUser._id
+              ? {
+                  ...g,
+                  lastMessage: newMsg.image
+                    ? "📷 Photo"
+                    : newMsg.document
+                      ? "📄 Document"
+                      : newMsg.text,
+                  lastMessageTime: newMsg.createdAt,
+                  lastMessageSenderId: authUser._id,
+                }
+              : g,
+          )
+          .sort(
+            (a, b) => new Date(b.lastMessageTime) - new Date(a.lastMessageTime),
+          );
+        set({ groups: updatedGroups });
+      } else {
+        const updatedUsers = users
+          .map((u) =>
+            u._id === selectedUser._id
+              ? {
+                  ...u,
+                  lastMessage: newMsg.image
+                    ? "📷 Photo"
+                    : newMsg.document
+                      ? "📄 Document"
+                      : newMsg.text,
+                  lastMessageTime: newMsg.createdAt,
+                  lastMessageSenderId: authUser._id,
+                  isLastMessageSeen: false,
+                }
+              : u,
+          )
+          .sort(
+            (a, b) => new Date(b.lastMessageTime) - new Date(a.lastMessageTime),
+          );
+        set({ users: updatedUsers });
+      }
     } catch (error) {
       toast.error("Message failed to send");
     }
@@ -217,21 +270,119 @@ export const useChatStore = create((set, get) => ({
     const authUser = useAuthStore.getState().authUser;
     if (!socket) return;
 
-    // FIX: Nuke existing listeners to prevent duplicate message rendering
     get().unsubscribeFromMessages();
 
     socket.on("newMessage", (newMessage) => {
-      const { selectedUser } = get();
-      if (selectedUser?._id === newMessage.senderId._id) {
+      const { selectedUser, users } = get();
+
+      // FIX: Check if the message belongs in the current chat,
+      // whether you sent it (like a call log) OR received it!
+      const isMessageForSelected =
+        selectedUser?._id === newMessage.senderId._id ||
+        selectedUser?._id === newMessage.receiverId;
+
+      if (isMessageForSelected) {
         set({ messages: [...get().messages, newMessage] });
       }
+
+      let userFound = false;
+      const updatedUsers = users.map((u) => {
+        // Find the user to update the sidebar preview. If we sent it, update the receiver's preview.
+        const targetId =
+          newMessage.senderId._id === authUser._id
+            ? newMessage.receiverId
+            : newMessage.senderId._id;
+
+        if (u._id === targetId) {
+          userFound = true;
+          return {
+            ...u,
+            lastMessage: newMessage.image
+              ? "📷 Photo"
+              : newMessage.document
+                ? "📄 Document"
+                : newMessage.text,
+            lastMessageTime: newMessage.createdAt,
+            lastMessageSenderId: newMessage.senderId._id,
+            unreadCount:
+              isMessageForSelected || newMessage.senderId._id === authUser._id
+                ? 0
+                : (u.unreadCount || 0) + 1,
+            isLastMessageSeen: false,
+          };
+        }
+        return u;
+      });
+
+      if (!userFound) {
+        // Fallback for new contacts
+        const targetId =
+          newMessage.senderId._id === authUser._id
+            ? newMessage.receiverId
+            : newMessage.senderId._id;
+        const targetInfo =
+          newMessage.senderId._id === authUser._id ? null : newMessage.senderId;
+
+        if (targetInfo) {
+          updatedUsers.push({
+            _id: targetId,
+            fullName: targetInfo.fullName,
+            profilePic: targetInfo.profilePic,
+            lastMessage: newMessage.image
+              ? "📷 Photo"
+              : newMessage.document
+                ? "📄 Document"
+                : newMessage.text,
+            lastMessageTime: newMessage.createdAt,
+            lastMessageSenderId: newMessage.senderId._id,
+            unreadCount: isMessageForSelected ? 0 : 1,
+            isLastMessageSeen: false,
+          });
+        }
+      }
+
+      set({
+        users: updatedUsers.sort(
+          (a, b) => new Date(b.lastMessageTime) - new Date(a.lastMessageTime),
+        ),
+      });
     });
 
     socket.on("newGroupMessage", (newMessage) => {
-      const { selectedUser } = get();
-      if (selectedUser?._id === newMessage.groupId) {
+      const { selectedUser, groups, getGroups } = get();
+      if (newMessage.senderId._id === authUser._id) return;
+
+      const isMessageForSelected = selectedUser?._id === newMessage.groupId;
+      if (isMessageForSelected) {
         set({ messages: [...get().messages, newMessage] });
       }
+
+      let groupFound = false;
+      const updatedGroups = groups.map((g) => {
+        if (g._id === newMessage.groupId) {
+          groupFound = true;
+          return {
+            ...g,
+            lastMessage: newMessage.image
+              ? "📷 Photo"
+              : newMessage.document
+                ? "📄 Document"
+                : newMessage.text,
+            lastMessageTime: newMessage.createdAt,
+            lastMessageSenderId: newMessage.senderId._id,
+            unreadCount: isMessageForSelected ? 0 : (g.unreadCount || 0) + 1,
+          };
+        }
+        return g;
+      });
+
+      if (!groupFound) getGroups();
+      else
+        set({
+          groups: updatedGroups.sort(
+            (a, b) => new Date(b.lastMessageTime) - new Date(a.lastMessageTime),
+          ),
+        });
     });
 
     socket.on("messageReaction", ({ messageId, reactions }) => {
@@ -247,7 +398,8 @@ export const useChatStore = create((set, get) => ({
     });
 
     socket.on("messagesSeen", ({ readerId }) => {
-      const { selectedUser, messages } = get();
+      const { selectedUser, messages, users } = get();
+
       if (selectedUser?._id === readerId) {
         set({
           messages: messages.map((msg) =>
@@ -257,6 +409,12 @@ export const useChatStore = create((set, get) => ({
           ),
         });
       }
+
+      set({
+        users: users.map((u) =>
+          u._id === readerId ? { ...u, isLastMessageSeen: true } : u,
+        ),
+      });
     });
 
     socket.on("userTyping", ({ userId }) => {
@@ -326,6 +484,18 @@ export const useChatStore = create((set, get) => ({
         toast.error("The admin deleted this group");
       }
     });
+
+    socket.on("userProfileUpdated", ({ userId, profilePic }) => {
+      set((state) => ({
+        users: state.users.map((u) =>
+          u._id === userId ? { ...u, profilePic } : u,
+        ),
+        selectedUser:
+          state.selectedUser?._id === userId
+            ? { ...state.selectedUser, profilePic }
+            : state.selectedUser,
+      }));
+    });
   },
 
   unsubscribeFromMessages: () => {
@@ -342,11 +512,29 @@ export const useChatStore = create((set, get) => ({
       socket.off("memberLeft");
       socket.off("memberRemoved");
       socket.off("groupDeleted");
+      socket.off("userProfileUpdated");
     }
   },
 
   setSelectedUser: (selectedUser) => {
     set({ selectedUser });
-    if (selectedUser) get().getMessages(selectedUser._id);
+    if (selectedUser) {
+      get().getMessages(selectedUser._id);
+
+      if (selectedUser.members) {
+        set((state) => ({
+          groups: state.groups.map((g) =>
+            g._id === selectedUser._id ? { ...g, unreadCount: 0 } : g,
+          ),
+        }));
+      } else {
+        set((state) => ({
+          users: state.users.map((u) =>
+            u._id === selectedUser._id ? { ...u, unreadCount: 0 } : u,
+          ),
+        }));
+        get().markAsSeen(selectedUser._id);
+      }
+    }
   },
 }));

@@ -1,8 +1,17 @@
 import { useState } from "react";
 import { useAuthStore } from "../store/useAuthStore";
-import { Eye, EyeOff, Loader2, Lock, Mail, MessageSquare, User } from "lucide-react";
+import {
+  Eye,
+  EyeOff,
+  Loader2,
+  Lock,
+  Mail,
+  MessageSquare,
+  User,
+  CheckCircle2,
+  Circle,
+} from "lucide-react";
 import { Link } from "react-router-dom";
-
 import AuthImagePattern from "../components/AuthImagePattern";
 import toast from "react-hot-toast";
 
@@ -16,27 +25,50 @@ const SignUpPage = () => {
 
   const { signup, isSigningUp } = useAuthStore();
 
+  // 1. Live Password Validation States
+  const hasMinLength = formData.password.length >= 6;
+  const hasNumber = /\d/.test(formData.password);
+  const hasSpecialChar = /[!@#$%^&*(),.?":{}|<>]/.test(formData.password);
+
+  // The form is only valid if all three conditions are met
+  const isPasswordStrong = hasMinLength && hasNumber && hasSpecialChar;
+
   const validateForm = () => {
-    if (!formData.fullName.trim()) return toast.error("Full name is required");
-    if (!formData.email.trim()) return toast.error("Email is required");
-    if (!/\S+@\S+\.\S+/.test(formData.email)) return toast.error("Invalid email format");
-    if (!formData.password) return toast.error("Password is required");
-    if (formData.password.length < 6) return toast.error("Password must be at least 6 characters");
+    if (!formData.fullName.trim()) {
+      toast.error("Full name is required");
+      return false;
+    }
+    if (!formData.email.trim()) {
+      toast.error("Email is required");
+      return false;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(formData.email)) {
+      toast.error("Invalid email format");
+      return false;
+    }
+    if (!formData.password) {
+      toast.error("Password is required");
+      return false;
+    }
+    if (!isPasswordStrong) {
+      toast.error("Please meet all password requirements");
+      return false;
+    }
 
     return true;
   };
 
   const handleSubmit = (e) => {
     e.preventDefault();
-
-    const success = validateForm();
-
-    if (success === true) signup(formData);
+    if (validateForm()) {
+      signup(formData);
+    }
   };
 
   return (
     <div className="min-h-screen grid lg:grid-cols-2">
-      {/* left side */}
+      {/* Left side */}
       <div className="flex flex-col justify-center items-center p-6 sm:p-12">
         <div className="w-full max-w-md space-y-8">
           {/* LOGO */}
@@ -49,11 +81,14 @@ const SignUpPage = () => {
                 <MessageSquare className="size-6 text-primary" />
               </div>
               <h1 className="text-2xl font-bold mt-2">Create Account</h1>
-              <p className="text-base-content/60">Get started with your free account</p>
+              <p className="text-base-content/60">
+                Get started with your free account
+              </p>
             </div>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Full Name */}
             <div className="form-control">
               <label className="label">
                 <span className="label-text font-medium">Full Name</span>
@@ -64,14 +99,17 @@ const SignUpPage = () => {
                 </div>
                 <input
                   type="text"
-                  className={`input input-bordered w-full pl-10`}
+                  className="input input-bordered w-full pl-10 focus:border-primary transition-colors"
                   placeholder="John Doe"
                   value={formData.fullName}
-                  onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, fullName: e.target.value })
+                  }
                 />
               </div>
             </div>
 
+            {/* Email */}
             <div className="form-control">
               <label className="label">
                 <span className="label-text font-medium">Email</span>
@@ -82,14 +120,17 @@ const SignUpPage = () => {
                 </div>
                 <input
                   type="email"
-                  className={`input input-bordered w-full pl-10`}
+                  className="input input-bordered w-full pl-10 focus:border-primary transition-colors"
                   placeholder="you@example.com"
                   value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, email: e.target.value })
+                  }
                 />
               </div>
             </div>
 
+            {/* Password */}
             <div className="form-control">
               <label className="label">
                 <span className="label-text font-medium">Password</span>
@@ -100,14 +141,16 @@ const SignUpPage = () => {
                 </div>
                 <input
                   type={showPassword ? "text" : "password"}
-                  className={`input input-bordered w-full pl-10`}
+                  className="input input-bordered w-full pl-10 focus:border-primary transition-colors"
                   placeholder="••••••••"
                   value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, password: e.target.value })
+                  }
                 />
                 <button
                   type="button"
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center hover:text-primary transition-colors"
                   onClick={() => setShowPassword(!showPassword)}
                 >
                   {showPassword ? (
@@ -117,13 +160,53 @@ const SignUpPage = () => {
                   )}
                 </button>
               </div>
+
+              {/* 2. Interactive Password Checklist */}
+              {formData.password && (
+                <div className="mt-3 space-y-1.5 bg-base-200/50 p-3 rounded-lg border border-base-300 animate-in fade-in slide-in-from-top-2 duration-300">
+                  <div
+                    className={`flex items-center gap-2 text-sm transition-colors duration-300 ${hasMinLength ? "text-success" : "text-base-content/50"}`}
+                  >
+                    {hasMinLength ? (
+                      <CheckCircle2 className="size-4" />
+                    ) : (
+                      <Circle className="size-4" />
+                    )}
+                    <span>At least 6 characters</span>
+                  </div>
+                  <div
+                    className={`flex items-center gap-2 text-sm transition-colors duration-300 ${hasNumber ? "text-success" : "text-base-content/50"}`}
+                  >
+                    {hasNumber ? (
+                      <CheckCircle2 className="size-4" />
+                    ) : (
+                      <Circle className="size-4" />
+                    )}
+                    <span>Contains at least 1 number</span>
+                  </div>
+                  <div
+                    className={`flex items-center gap-2 text-sm transition-colors duration-300 ${hasSpecialChar ? "text-success" : "text-base-content/50"}`}
+                  >
+                    {hasSpecialChar ? (
+                      <CheckCircle2 className="size-4" />
+                    ) : (
+                      <Circle className="size-4" />
+                    )}
+                    <span>Contains a special character</span>
+                  </div>
+                </div>
+              )}
             </div>
 
-            <button type="submit" className="btn btn-primary w-full" disabled={isSigningUp}>
+            <button
+              type="submit"
+              className="btn btn-primary w-full"
+              disabled={isSigningUp}
+            >
               {isSigningUp ? (
                 <>
                   <Loader2 className="size-5 animate-spin" />
-                  Loading...
+                  Creating Account...
                 </>
               ) : (
                 "Create Account"
@@ -134,7 +217,10 @@ const SignUpPage = () => {
           <div className="text-center">
             <p className="text-base-content/60">
               Already have an account?{" "}
-              <Link to="/login" className="link link-primary">
+              <Link
+                to="/login"
+                className="link link-primary font-medium hover:underline"
+              >
                 Sign in
               </Link>
             </p>
@@ -142,11 +228,10 @@ const SignUpPage = () => {
         </div>
       </div>
 
-      {/* right side */}
-
+      {/* Right side */}
       <AuthImagePattern
-        title="Join our community"
-        subtitle="Connect with friends, share moments, and stay in touch with your loved ones."
+        title="Hop in. The squad's waiting."
+        subtitle="Texting is cool, but real-time video hits different. Drop into crystal-clear calls and hang out without limits."
       />
     </div>
   );

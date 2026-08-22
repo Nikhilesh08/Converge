@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useCallStore } from "../store/useCallStore";
 import {
   Phone,
@@ -24,22 +24,80 @@ const VideoCallModal = () => {
     isVideoOn,
     toggleMic,
     toggleVideo,
+    callStartTime,
+    isRemoteSharingScreen,
   } = useCallStore();
 
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
+  const [elapsedTime, setElapsedTime] = useState(0);
 
-  // Attach local / screen sharing stream and force browser playback
+  const ringtoneRef = useRef(new Audio("/sounds/ringtone.mp3"));
+  const ringbackRef = useRef(new Audio("/sounds/ringback.mp3"));
+
+  useEffect(() => {
+    let intervalId;
+    if (callState === "active" && callStartTime) {
+      intervalId = setInterval(() => {
+        setElapsedTime(Math.floor((Date.now() - callStartTime) / 1000));
+      }, 1000);
+    } else {
+      setElapsedTime(0);
+    }
+    return () => clearInterval(intervalId);
+  }, [callState, callStartTime]);
+
+  const formatTime = (seconds) => {
+    const m = Math.floor(seconds / 60)
+      .toString()
+      .padStart(2, "0");
+    const s = (seconds % 60).toString().padStart(2, "0");
+    return `${m}:${s}`;
+  };
+
+  useEffect(() => {
+    const ringtone = ringtoneRef.current;
+    const ringback = ringbackRef.current;
+    ringtone.loop = true;
+    ringback.loop = true;
+
+    const isReceiver = !!callerInfo?.signal;
+
+    if (callState === "ringing") {
+      if (isReceiver) {
+        ringtone
+          .play()
+          .catch((e) => console.warn("Browser blocked ringtone autoplay:", e));
+      } else {
+        ringback
+          .play()
+          .catch((e) => console.warn("Browser blocked ringback autoplay:", e));
+      }
+    } else if (callState === "calling") {
+      if (!isReceiver) {
+        ringback
+          .play()
+          .catch((e) => console.warn("Browser blocked ringback autoplay:", e));
+      }
+    } else {
+      ringtone.pause();
+      ringtone.currentTime = 0;
+      ringback.pause();
+      ringback.currentTime = 0;
+    }
+
+    return () => {
+      ringtone.pause();
+      ringback.pause();
+    };
+  }, [callState, callerInfo]);
+
   useEffect(() => {
     if (localVideoRef.current && (localStream || screenStream)) {
       const streamToPlay = screenStream || localStream;
-
-      // Only assign if different to prevent the stream from flashing black
       if (localVideoRef.current.srcObject !== streamToPlay) {
         localVideoRef.current.srcObject = streamToPlay;
       }
-
-      // Force the browser to resume playing when the element unhides
       if (isVideoOn || screenStream) {
         localVideoRef.current.play().catch((error) => {
           console.warn("Browser blocked local video resume:", error);
@@ -48,158 +106,186 @@ const VideoCallModal = () => {
     }
   }, [localStream, screenStream, callState, isVideoOn]);
 
-  // Attach remote stream & bypass mobile/desktop autoplay policies
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
       remoteVideoRef.current.play().catch((error) => {
-        console.warn(
-          "Browser autoplay policy blocked audio/video. User interaction required:",
-          error,
-        );
+        console.warn("Browser autoplay policy blocked audio/video:", error);
       });
     }
   }, [remoteStream, callState]);
 
   if (callState === "idle") return null;
 
+  const isActive = callState === "active";
+  const name = callerInfo?.fullName || callerInfo?.name || "User";
+  const profilePic = callerInfo?.profilePic || "/avatar.png";
+
   return (
-    <div className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-4 backdrop-blur-sm">
-      <div className="relative w-full max-w-4xl aspect-video bg-zinc-900 rounded-2xl overflow-hidden shadow-2xl border border-zinc-800 flex flex-col items-center justify-center">
-        {/* Ringing UI */}
-        {callState === "ringing" && (
-          <div className="text-center animate-pulse">
-            <div className="size-24 bg-primary/20 rounded-full flex items-center justify-center mx-auto mb-4 border-4 border-primary">
-              <Video className="size-10 text-primary" />
+    <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-xl flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-300">
+      <div
+        className={`relative bg-zinc-950/90 border border-white/10 overflow-hidden flex flex-col items-center justify-center shadow-2xl transition-all duration-500 rounded-3xl w-full ${
+          isActive
+            ? "max-w-5xl h-[85vh] aspect-video"
+            : "max-w-md aspect-[4/5] sm:aspect-square"
+        }`}
+      >
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-primary/20 rounded-full blur-[100px] pointer-events-none" />
+
+        {!isActive && (
+          <div className="flex flex-col items-center justify-between h-full w-full p-8 z-10">
+            <div className="text-center">
+              <span className="inline-block px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs font-semibold uppercase tracking-widest text-zinc-400 mb-3">
+                Converge Video
+              </span>
+              <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight truncate max-w-xs">
+                {name}
+              </h2>
+              <p className="text-primary font-medium text-sm mt-1 animate-pulse">
+                {callState === "calling" ? "Calling..." : "Ringing..."}
+              </p>
             </div>
-            <h2 className="text-2xl font-bold text-white mb-2">
-              {callerInfo?.name} is calling...
-            </h2>
-            <div className="flex gap-4 justify-center mt-8">
+
+            <div className="relative flex items-center justify-center my-6">
+              <div className="absolute size-40 rounded-full border border-primary/20 animate-ping duration-1000" />
+              <div className="absolute size-32 rounded-full border border-primary/30 animate-pulse" />
+              <div className="size-24 rounded-full overflow-hidden border-2 border-primary/50 shadow-2xl z-10 bg-zinc-800">
+                <img
+                  src={profilePic}
+                  alt={name}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-6">
+              {callState === "ringing" && callerInfo?.signal && (
+                <button
+                  onClick={answerCall}
+                  className="size-16 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white flex items-center justify-center shadow-lg shadow-emerald-500/30 transition-transform hover:scale-110 active:scale-95"
+                  title="Accept"
+                >
+                  <Phone className="size-7" />
+                </button>
+              )}
               <button
-                onClick={answerCall}
-                className="btn btn-success btn-circle btn-lg shadow-lg shadow-success/30"
+                onClick={() => endCall(true, "cancelled")}
+                className="size-16 rounded-full bg-rose-500 hover:bg-rose-600 text-white flex items-center justify-center shadow-lg shadow-rose-500/30 transition-transform hover:scale-110 active:scale-95"
+                title="Decline"
               >
-                <Phone className="size-8 text-white" />
-              </button>
-              <button
-                onClick={() => endCall(true)}
-                className="btn btn-error btn-circle btn-lg shadow-lg shadow-error/30"
-              >
-                <PhoneOff className="size-8 text-white" />
+                <PhoneOff className="size-7" />
               </button>
             </div>
           </div>
         )}
 
-        {/* Calling UI */}
-        {callState === "calling" && (
-          <div className="text-center">
-            <h2 className="text-2xl font-bold text-white mb-2">
-              Calling {callerInfo?.fullName || callerInfo?.name}...
-            </h2>
-            <p className="text-zinc-400 mb-8">Waiting for them to pick up</p>
-            <button
-              onClick={() => endCall(true)}
-              className="btn btn-error btn-circle btn-lg"
-            >
-              <PhoneOff className="size-8 text-white" />
-            </button>
-          </div>
-        )}
-
-        {/* Active Call UI */}
-        {callState === "active" && (
+        {isActive && (
           <>
+            <div className="absolute top-0 left-0 w-full p-4 md:p-6 flex justify-between items-center z-20 bg-gradient-to-b from-black/80 via-black/30 to-transparent pointer-events-none">
+              <div className="flex items-center gap-3">
+                <div className="size-9 rounded-full overflow-hidden border border-white/20">
+                  <img
+                    src={profilePic}
+                    alt={name}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <div>
+                  <h3 className="text-white font-semibold text-sm sm:text-base leading-tight">
+                    {name}
+                  </h3>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="size-2 rounded-full bg-red-500 animate-pulse" />
+                    <span className="text-white/80 font-mono text-xs tracking-wider">
+                      {formatTime(elapsedTime)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Real-time Screen Sharing Notification Banner */}
+              {isRemoteSharingScreen && (
+                <div className="bg-primary/90 text-white px-4 py-1.5 rounded-full text-xs font-medium shadow-lg backdrop-blur-md animate-pulse flex items-center gap-2">
+                  <MonitorUp size={14} />
+                  <span>{name} is sharing their screen</span>
+                </div>
+              )}
+            </div>
+
             <video
               ref={remoteVideoRef}
               autoPlay
               playsInline
-              className="w-full h-full object-cover"
+              className="w-full h-full object-cover z-0"
             />
 
-            {/* Local Video Preview */}
-            <div className="absolute bottom-6 right-6 w-48 aspect-video bg-black rounded-lg overflow-hidden border-2 border-zinc-700 shadow-xl">
-              {/* Persistent Mute Indicator Overlay */}
+            <div className="absolute bottom-20 right-4 md:bottom-6 md:right-6 w-28 sm:w-44 aspect-video bg-zinc-900 rounded-2xl overflow-hidden border border-white/20 shadow-2xl z-20">
               {!isMicOn && (
-                <div className="absolute top-2 right-2 z-10 bg-black/70 p-1.5 rounded-full shadow-lg backdrop-blur-md">
-                  <MicOff className="size-4 text-error" />
+                <div className="absolute top-2 right-2 z-30 bg-black/70 p-1.5 rounded-full backdrop-blur-md">
+                  <MicOff className="size-3 text-rose-500" />
                 </div>
               )}
-
-              {/* Video Off Placeholder Overlay */}
               {!isVideoOn && !screenStream && (
-                <div className="absolute inset-0 w-full h-full flex items-center justify-center bg-zinc-800 z-10">
-                  <VideoOff className="size-8 text-zinc-500" />
+                <div className="absolute inset-0 w-full h-full flex items-center justify-center bg-zinc-800 z-20">
+                  <VideoOff className="size-6 text-zinc-400" />
                 </div>
               )}
-
-              {/* Kept permanently mounted to avoid losing stream reference */}
               <video
                 ref={localVideoRef}
                 autoPlay
                 playsInline
                 muted
-                className={`w-full h-full object-cover relative z-0 ${!screenStream ? "mirror" : ""} ${
-                  !isVideoOn && !screenStream ? "hidden" : "block"
-                }`}
+                className={`w-full h-full object-cover relative z-10 ${
+                  !screenStream ? "scale-x-[-1]" : ""
+                } ${!isVideoOn && !screenStream ? "hidden" : "block"}`}
               />
             </div>
 
-            {/* Controls */}
-            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-3 bg-black/60 p-3 rounded-full backdrop-blur-md">
+            <div className="absolute bottom-5 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-zinc-900/80 px-4 py-2.5 rounded-full backdrop-blur-2xl border border-white/10 shadow-2xl z-30 pointer-events-auto">
               <button
                 onClick={toggleMic}
-                className={`btn btn-circle ${
+                className={`size-10 rounded-full flex items-center justify-center transition-all ${
                   isMicOn
-                    ? "btn-ghost text-white hover:bg-white/20"
-                    : "btn-error text-white"
+                    ? "bg-white/10 text-white hover:bg-white/20"
+                    : "bg-white text-black"
                 }`}
-                title={isMicOn ? "Mute Microphone" : "Unmute Microphone"}
+                title="Mute/Unmute"
               >
-                {isMicOn ? (
-                  <Mic className="size-5" />
-                ) : (
-                  <MicOff className="size-5" />
-                )}
+                {isMicOn ? <Mic size={18} /> : <MicOff size={18} />}
               </button>
 
               <button
                 onClick={toggleVideo}
-                className={`btn btn-circle ${
+                className={`size-10 rounded-full flex items-center justify-center transition-all ${
                   isVideoOn
-                    ? "btn-ghost text-white hover:bg-white/20"
-                    : "btn-error text-white"
+                    ? "bg-white/10 text-white hover:bg-white/20"
+                    : "bg-white text-black"
                 }`}
-                title={isVideoOn ? "Turn Off Camera" : "Turn On Camera"}
+                title="Camera On/Off"
               >
-                {isVideoOn ? (
-                  <Video className="size-5" />
-                ) : (
-                  <VideoOff className="size-5" />
-                )}
+                {isVideoOn ? <Video size={18} /> : <VideoOff size={18} />}
               </button>
 
               <button
                 onClick={toggleScreenShare}
-                className={`btn btn-circle ${
+                className={`size-10 rounded-full flex items-center justify-center transition-all ${
                   screenStream
-                    ? "btn-primary"
-                    : "btn-ghost text-white hover:bg-white/20"
+                    ? "bg-primary text-white"
+                    : "bg-white/10 text-white hover:bg-white/20"
                 }`}
                 title="Share Screen"
               >
-                <MonitorUp className="size-5" />
+                <MonitorUp size={18} />
               </button>
 
-              <div className="w-px h-10 bg-white/20 mx-2 self-center"></div>
+              <div className="w-px h-6 bg-white/20 mx-1" />
 
               <button
                 onClick={() => endCall(true)}
-                className="btn btn-error btn-circle"
+                className="size-10 rounded-full bg-rose-500 hover:bg-rose-600 text-white flex items-center justify-center shadow-lg shadow-rose-500/30 transition-all hover:scale-105 active:scale-95"
                 title="End Call"
               >
-                <PhoneOff className="size-5 text-white" />
+                <PhoneOff size={18} />
               </button>
             </div>
           </>

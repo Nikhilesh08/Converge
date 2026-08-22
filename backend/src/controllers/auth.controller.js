@@ -2,6 +2,7 @@ import { generateToken } from "../lib/utils.js";
 import User from "../models/user.model.js";
 import bcrypt from "bcryptjs";
 import cloudinary from "../lib/cloudinary.js";
+import { io } from "../lib/socket.js"; // FIX: Imported io for real-time broadcasts
 
 export const signup = async (req, res) => {
   const { fullName, email, password } = req.body;
@@ -96,16 +97,30 @@ export const updateProfile = async (req, res) => {
     const { profilePic } = req.body;
     const userId = req.user._id;
 
+    let updatedUser;
+
     if (!profilePic) {
-      return res.status(400).json({ message: "Profile pic is required" });
+      updatedUser = await User.findByIdAndUpdate(
+        userId,
+        { profilePic: "" },
+        { new: true },
+      );
+    } else {
+      const uploadResponse = await cloudinary.uploader.upload(profilePic);
+      updatedUser = await User.findByIdAndUpdate(
+        userId,
+        { profilePic: uploadResponse.secure_url },
+        { new: true },
+      );
     }
 
-    const uploadResponse = await cloudinary.uploader.upload(profilePic);
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
-      { profilePic: uploadResponse.secure_url },
-      { new: true },
-    );
+    // FIX: Broadcast the change instantly to all connected users
+    if (typeof io !== "undefined" && io !== null) {
+      io.emit("userProfileUpdated", {
+        userId: updatedUser._id,
+        profilePic: updatedUser.profilePic,
+      });
+    }
 
     res.status(200).json(updatedUser);
   } catch (error) {
@@ -123,7 +138,6 @@ export const checkAuth = (req, res) => {
   }
 };
 
-/* ✅ NEW FUNCTION (FULLY INTEGRATED) */
 export const getUsers = async (req, res) => {
   try {
     const loggedInUserId = req.user._id;

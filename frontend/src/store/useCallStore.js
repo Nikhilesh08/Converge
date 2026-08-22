@@ -6,6 +6,7 @@ let peerConnection = null;
 let localStream = null;
 let dataChannel = null;
 let pendingIceCandidates = [];
+let globalCallTimeoutId = null;
 
 export const useCallStore = create((set, get) => ({
   callState: "idle",
@@ -15,28 +16,75 @@ export const useCallStore = create((set, get) => ({
   screenStream: null,
   isMicOn: true,
   isVideoOn: true,
+  callStartTime: null,
+  isCallAccepted: false,
+  isRemoteSharingScreen: false,
 
   initWebRTCListeners: () => {
     const socket = useAuthStore.getState().socket;
     if (!socket) return;
 
+    if (
+      "Notification" in window &&
+      Notification.permission !== "granted" &&
+      Notification.permission !== "denied"
+    ) {
+      Notification.requestPermission();
+    }
+
     socket.off("callUser");
+    socket.off("callRinging");
     socket.off("callAccepted");
     socket.off("iceCandidate");
     socket.off("callEnded");
+    socket.off("userSharingScreen");
 
-    socket.on("callUser", async ({ signal, from, name }) => {
-      set({ callState: "ringing", callerInfo: { id: from, name, signal } });
+    socket.on("callUser", async ({ signal, from, name, profilePic }) => {
+      set({
+        callState: "ringing",
+        callerInfo: {
+          id: from,
+          _id: from,
+          name,
+          fullName: name,
+          profilePic,
+          signal,
+        },
+      });
+
+      if (
+        document.hidden &&
+        "Notification" in window &&
+        Notification.permission === "granted"
+      ) {
+        new Notification(`Incoming video call from ${name}`, {
+          icon: profilePic || "/avatar.png",
+          body: "Click to answer",
+          requireInteraction: true,
+        });
+      }
+    });
+
+    socket.on("callRinging", () => {
+      if (get().callState === "calling") {
+        set({ callState: "ringing" });
+      }
     });
 
     socket.on("callAccepted", async (signal) => {
-      set({ callState: "active" });
+      if (globalCallTimeoutId) clearTimeout(globalCallTimeoutId);
+
+      set({
+        callState: "active",
+        isCallAccepted: true,
+        callStartTime: Date.now(),
+      });
+
       if (peerConnection) {
         await peerConnection.setRemoteDescription(
           new RTCSessionDescription(signal),
         );
 
-        // FIX: Prevent crashing if connection closed right as call is accepted
         pendingIceCandidates.forEach((candidate) => {
           if (peerConnection.signalingState !== "closed") {
             peerConnection
@@ -60,9 +108,13 @@ export const useCallStore = create((set, get) => ({
       }
     });
 
+    socket.on("userSharingScreen", ({ sharing }) => {
+      set({ isRemoteSharingScreen: sharing });
+    });
+
     socket.on("callEnded", () => {
+      if (globalCallTimeoutId) clearTimeout(globalCallTimeoutId);
       get().endCall(false);
-      toast("Call ended");
     });
   },
 
@@ -130,6 +182,7 @@ export const useCallStore = create((set, get) => ({
   startCall: async (targetUser) => {
     const socket = useAuthStore.getState().socket;
     const authUser = useAuthStore.getState().authUser;
+    const onlineUsers = useAuthStore.getState().onlineUsers;
 
     try {
       localStream = await navigator.mediaDevices.getUserMedia({
@@ -137,13 +190,27 @@ export const useCallStore = create((set, get) => ({
         audio: true,
       });
 
+      const isTargetOnline = onlineUsers.includes(targetUser._id);
+
       set({
         localStream,
-        callState: "calling",
+        callState: isTargetOnline ? "ringing" : "calling",
         callerInfo: targetUser,
         isMicOn: true,
         isVideoOn: true,
+        isCallAccepted: false,
+        callStartTime: null,
+        isRemoteSharingScreen: false,
       });
+
+      if (globalCallTimeoutId) clearTimeout(globalCallTimeoutId);
+      globalCallTimeoutId = setTimeout(() => {
+        const currentState = get().callState;
+        if (currentState === "calling" || currentState === "ringing") {
+          get().endCall(true, "cancelled");
+          toast.error("No answer");
+        }
+      }, 30000);
 
       pendingIceCandidates = [];
       get().setupPeerConnection(targetUser._id, true);
@@ -168,20 +235,29 @@ export const useCallStore = create((set, get) => ({
     const socket = useAuthStore.getState().socket;
     const { callerInfo } = get();
 
+    if (globalCallTimeoutId) clearTimeout(globalCallTimeoutId);
+
     try {
       localStream = await navigator.mediaDevices.getUserMedia({
         video: true,
         audio: true,
       });
 
-      set({ localStream, callState: "active", isMicOn: true, isVideoOn: true });
+      set({
+        localStream,
+        callState: "active",
+        isMicOn: true,
+        isVideoOn: true,
+        isCallAccepted: true,
+        callStartTime: Date.now(),
+        isRemoteSharingScreen: false,
+      });
 
-      get().setupPeerConnection(callerInfo.id, false);
+      get().setupPeerConnection(callerInfo.id || callerInfo._id, false);
       await peerConnection.setRemoteDescription(
         new RTCSessionDescription(callerInfo.signal),
       );
 
-      // FIX: Prevent crashing if connection closed right as call is answered
       pendingIceCandidates.forEach((candidate) => {
         if (peerConnection && peerConnection.signalingState !== "closed") {
           peerConnection
@@ -194,7 +270,10 @@ export const useCallStore = create((set, get) => ({
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
 
-      socket.emit("answerCall", { signal: answer, to: callerInfo.id });
+      socket.emit("answerCall", {
+        signal: answer,
+        to: callerInfo.id || callerInfo._id,
+      });
     } catch (error) {
       console.error("Camera access error:", error);
       toast.error("Could not access camera/microphone");
@@ -222,9 +301,11 @@ export const useCallStore = create((set, get) => ({
   },
 
   toggleScreenShare: async () => {
-    try {
-      const { screenStream } = get();
+    const socket = useAuthStore.getState().socket;
+    const { callerInfo, screenStream } = get();
+    const partnerId = callerInfo?.id || callerInfo?._id;
 
+    try {
       if (screenStream) {
         screenStream.getTracks().forEach((track) => track.stop());
         const videoTrack = localStream.getVideoTracks()[0];
@@ -234,6 +315,8 @@ export const useCallStore = create((set, get) => ({
         if (sender) sender.replaceTrack(videoTrack);
 
         set({ screenStream: null });
+        if (socket && partnerId)
+          socket.emit("shareScreen", { to: partnerId, sharing: false });
       } else {
         const stream = await navigator.mediaDevices.getDisplayMedia({
           video: true,
@@ -245,6 +328,8 @@ export const useCallStore = create((set, get) => ({
         if (sender) sender.replaceTrack(screenTrack);
 
         set({ screenStream: stream });
+        if (socket && partnerId)
+          socket.emit("shareScreen", { to: partnerId, sharing: true });
 
         screenTrack.onended = () => {
           const videoTrack = localStream.getVideoTracks()[0];
@@ -253,6 +338,8 @@ export const useCallStore = create((set, get) => ({
             .find((s) => s.track.kind === "video");
           if (sender) sender.replaceTrack(videoTrack);
           set({ screenStream: null });
+          if (socket && partnerId)
+            socket.emit("shareScreen", { to: partnerId, sharing: false });
         };
       }
     } catch (error) {
@@ -260,12 +347,38 @@ export const useCallStore = create((set, get) => ({
     }
   },
 
-  endCall: (emitEvent = true) => {
+  endCall: (emitEvent = true, forcedStatus = null) => {
     const socket = useAuthStore.getState().socket;
-    const { callerInfo, screenStream } = get();
+    const {
+      callerInfo,
+      screenStream,
+      callStartTime,
+      isCallAccepted,
+      callState,
+    } = get();
+
+    if (globalCallTimeoutId) clearTimeout(globalCallTimeoutId);
+
+    let callDuration = 0;
+    let callLogStatus = forcedStatus || "missed";
+
+    if (!forcedStatus) {
+      if (isCallAccepted && callStartTime) {
+        callDuration = Math.floor((Date.now() - callStartTime) / 1000);
+        callLogStatus = "completed";
+      } else if (callState === "calling" || callState === "ringing") {
+        callLogStatus = "cancelled";
+      }
+    }
 
     if (emitEvent && callerInfo) {
-      socket.emit("endCall", { to: callerInfo.id || callerInfo._id });
+      const partnerId = callerInfo.id || callerInfo._id;
+      socket.emit("endCall", { to: partnerId });
+      socket.emit("createCallLog", {
+        to: partnerId,
+        status: callLogStatus,
+        duration: callDuration,
+      });
     }
 
     if (localStream) localStream.getTracks().forEach((track) => track.stop());
@@ -285,6 +398,9 @@ export const useCallStore = create((set, get) => ({
       localStream: null,
       screenStream: null,
       callerInfo: null,
+      callStartTime: null,
+      isCallAccepted: false,
+      isRemoteSharingScreen: false,
     });
   },
 

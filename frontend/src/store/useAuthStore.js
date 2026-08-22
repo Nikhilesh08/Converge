@@ -4,13 +4,18 @@ import { io } from "socket.io-client";
 import { useCallStore } from "./useCallStore";
 import toast from "react-hot-toast";
 
-const BASE_URL = import.meta.env.VITE_SOCKET_URL;
+// FIX: Bulletproof dynamic routing for Development vs. Production
+const BASE_URL =
+  import.meta.env.MODE === "development"
+    ? "http://localhost:5001"
+    : import.meta.env.VITE_SOCKET_URL || "/";
 
 export const useAuthStore = create((set, get) => ({
   authUser: null,
   isSigningUp: false,
   isLoggingIn: false,
   isCheckingAuth: true,
+  isUpdatingProfile: false,
   onlineUsers: [],
   lastSeenMap: {},
   socket: null,
@@ -62,7 +67,7 @@ export const useAuthStore = create((set, get) => ({
       set({ authUser: null });
       get().disconnectSocket();
 
-      // FIX: Aggressively wipe global WebRTC variables on logout
+      // Aggressively wipe global WebRTC variables on logout
       useCallStore.getState().endCall(false);
 
       toast.success("Logged out");
@@ -70,6 +75,21 @@ export const useAuthStore = create((set, get) => ({
       toast.error("Logout failed");
     }
   },
+
+  updateProfile: async (data) => {
+    set({ isUpdatingProfile: true });
+    try {
+      const res = await axiosInstance.put("/auth/update-profile", data);
+      set({ authUser: res.data });
+      toast.success("Profile updated successfully");
+    } catch (error) {
+      console.log("Error in update profile:", error);
+      toast.error(error.response?.data?.message || "Failed to update profile");
+    } finally {
+      set({ isUpdatingProfile: false });
+    }
+  },
+
   connectSocket: () => {
     const { authUser } = get();
     if (!authUser || get().socket?.connected) return;

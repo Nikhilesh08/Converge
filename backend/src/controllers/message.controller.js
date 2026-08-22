@@ -14,6 +14,7 @@ export const getUsersForSidebar = async (req, res) => {
 
     const usersWithMetadata = await Promise.all(
       filteredUsers.map(async (user) => {
+        // 1. Get the last message to display the text and time
         const lastMessage = await Message.findOne({
           groupId: null,
           $or: [
@@ -22,14 +23,27 @@ export const getUsersForSidebar = async (req, res) => {
           ],
         }).sort({ createdAt: -1 });
 
+        // 2. Calculate exact number of unread messages from this user to you
+        const unreadCount = await Message.countDocuments({
+          senderId: user._id,
+          receiverId: loggedInUserId,
+          isSeen: false,
+        });
+
         return {
           ...user.toObject(),
           lastMessage: lastMessage
             ? lastMessage.image
               ? "📷 Photo"
-              : lastMessage.text
+              : lastMessage.document
+                ? "📄 Document"
+                : lastMessage.text
             : "No messages yet",
           lastMessageTime: lastMessage ? lastMessage.createdAt : new Date(0),
+          // 3. Send tick and badge data to the frontend so it survives a refresh
+          lastMessageSenderId: lastMessage ? lastMessage.senderId : null,
+          isLastMessageSeen: lastMessage ? lastMessage.isSeen : false,
+          unreadCount: unreadCount,
         };
       }),
     );
@@ -61,16 +75,30 @@ export const getGroups = async (req, res) => {
           createdAt: -1,
         });
 
+        // Basic group unread check: if the last message was NOT sent by you and is unseen
+        let unreadCount = 0;
+        if (
+          lastMessage &&
+          String(lastMessage.senderId) !== String(loggedInUserId) &&
+          !lastMessage.isSeen
+        ) {
+          unreadCount = 1;
+        }
+
         return {
           ...group.toObject(),
           lastMessage: lastMessage
             ? lastMessage.image
               ? "📷 Photo"
-              : lastMessage.text
+              : lastMessage.document
+                ? "📄 Document"
+                : lastMessage.text
             : "No messages yet",
           lastMessageTime: lastMessage
             ? lastMessage.createdAt
             : group.createdAt,
+          lastMessageSenderId: lastMessage ? lastMessage.senderId : null,
+          unreadCount: unreadCount,
         };
       }),
     );
@@ -137,24 +165,20 @@ export const sendMessage = async (req, res) => {
     const { id: targetId } = req.params;
     const senderId = req.user._id;
 
-    // Upload Image
     let imageUrl = image
       ? (await cloudinary.uploader.upload(image)).secure_url
       : null;
 
-    // Upload Audio (Voice Notes) - Cloudinary uses resource_type: "video" for audio
     let audioUrl = audio
       ? (await cloudinary.uploader.upload(audio, { resource_type: "video" }))
           .secure_url
       : null;
 
-    // Upload Document (PDFs, Docs) - Cloudinary uses resource_type: "raw" for generic files
     let documentUrl = document
       ? (await cloudinary.uploader.upload(document, { resource_type: "raw" }))
           .secure_url
       : null;
 
-    // Determine message type based on payload
     let msgType = "text";
     if (imageUrl) msgType = "image";
     if (audioUrl) msgType = "audio";
@@ -176,7 +200,6 @@ export const sendMessage = async (req, res) => {
 
     await newMessage.save();
 
-    // FIX: Properly query and populate the message to guarantee senderId is an object
     const populatedMessage = await Message.findById(newMessage._id).populate(
       "senderId",
       "fullName profilePic",

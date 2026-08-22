@@ -2,11 +2,11 @@ import { Server } from "socket.io";
 import http from "http";
 import express from "express";
 import User from "../models/user.model.js";
+import Message from "../models/message.model.js";
 
 const app = express();
 const server = http.createServer(app);
 
-// Safely strip trailing slashes for Socket.IO origin checks
 const parseAllowedOrigins = () =>
   (process.env.CLIENT_URL || process.env.FRONTEND_URL || "")
     .split(",")
@@ -15,7 +15,6 @@ const parseAllowedOrigins = () =>
 
 const isAllowedOrigin = (origin) => {
   if (!origin) return true;
-
   const allowedOrigins = parseAllowedOrigins();
   return (
     allowedOrigins.includes(origin) ||
@@ -61,7 +60,6 @@ io.on("connection", (socket) => {
     userSocketMap[userId] = socket.id;
   }
 
-  // Broadcast the master list immediately upon any connection
   io.emit("getOnlineUsers", Object.keys(userSocketMap));
 
   socket.on("joinChat", (partnerId) => {
@@ -89,14 +87,17 @@ io.on("connection", (socket) => {
   // ==========================================
   // --- WEBRTC SIGNALING ---
   // ==========================================
-  socket.on("callUser", ({ userToCall, signalData, from, name }) => {
+  socket.on("callUser", async ({ userToCall, signalData, from, name }) => {
     const receiverSocketId = getReceiverSocketId(userToCall);
+    const callerUser = await User.findById(from).select("fullName profilePic");
     if (receiverSocketId) {
       io.to(receiverSocketId).emit("callUser", {
         signal: signalData,
         from,
-        name,
+        name: callerUser?.fullName || name,
+        profilePic: callerUser?.profilePic,
       });
+      socket.emit("callRinging");
     }
   });
 
@@ -115,6 +116,56 @@ io.on("connection", (socket) => {
   socket.on("endCall", ({ to }) => {
     const receiverSocketId = getReceiverSocketId(to);
     if (receiverSocketId) io.to(receiverSocketId).emit("callEnded");
+  });
+
+  // --- SCREEN SHARING SIGNALING ---
+  socket.on("shareScreen", ({ to, sharing }) => {
+    const receiverSocketId = getReceiverSocketId(to);
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit("userSharingScreen", { sharing });
+    }
+  });
+
+  // ==========================================
+  // --- REAL-TIME CALL LOGS ---
+  // ==========================================
+  socket.on("createCallLog", async ({ to, status, duration }) => {
+    if (!userId || !to) return;
+
+    try {
+      let logText = "";
+      if (status === "completed") {
+        const minutes = Math.floor(duration / 60);
+        const seconds = duration % 60;
+        const timeString =
+          minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+        logText = `📞 Video call • ${timeString}`;
+      } else if (status === "missed") {
+        logText = "📞 Missed video call";
+      } else if (status === "cancelled") {
+        logText = "📞 Canceled video call";
+      }
+
+      const callLogMessage = new Message({
+        senderId: userId,
+        receiverId: to,
+        text: logText,
+      });
+
+      await callLogMessage.save();
+      const populatedMessage = await callLogMessage.populate(
+        "senderId",
+        "fullName profilePic",
+      );
+
+      const receiverSocketId = getReceiverSocketId(to);
+      if (receiverSocketId) {
+        io.to(receiverSocketId).emit("newMessage", populatedMessage);
+      }
+      socket.emit("newMessage", populatedMessage);
+    } catch (error) {
+      console.error("Error creating call log:", error);
+    }
   });
 
   // ==========================================
@@ -141,11 +192,10 @@ io.on("connection", (socket) => {
   });
 
   // ==========================================
-  // --- DISCONNECT (THE ARCHITECTURAL FIX) ---
+  // --- DISCONNECT ---
   // ==========================================
   socket.on("disconnect", async () => {
     if (userId) {
-      // Strict Ownership Check: Only modify state if this dying socket is the current session.
       if (userSocketMap[userId] === socket.id) {
         delete userSocketMap[userId];
         delete userActiveChat[userId];
@@ -159,7 +209,6 @@ io.on("connection", (socket) => {
         }
       }
     }
-    // Always broadcast the source of truth to all clients
     io.emit("getOnlineUsers", Object.keys(userSocketMap));
   });
 });

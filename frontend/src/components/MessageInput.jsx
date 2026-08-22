@@ -171,7 +171,7 @@ const MessageInput = () => {
   };
 
   const handleSendMessage = async (e) => {
-    e.preventDefault();
+    if (e?.preventDefault) e.preventDefault();
     if (!text.trim() && !imagePreview && !documentFile && !audioBlob) return;
 
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
@@ -198,6 +198,13 @@ const MessageInput = () => {
       setShowEmojiPicker(false);
     } catch (error) {
       toast.error("Failed to send message");
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage(e);
     }
   };
 
@@ -334,6 +341,7 @@ const MessageInput = () => {
                 placeholder="Type a message"
                 value={text}
                 onChange={handleTyping}
+                onKeyDown={handleKeyDown}
                 rows={1}
                 onInput={(e) => {
                   e.target.style.height = "auto";
@@ -366,21 +374,22 @@ const MessageInput = () => {
           {isReadyToSend ? (
             <button
               onClick={handleSendMessage}
-              className="btn btn-circle bg-emerald-500 hover:bg-emerald-600 text-white border-none shadow-md h-12 w-12"
+              className="btn btn-circle bg-primary hover:bg-primary/90 text-primary-content border-none shadow-md h-12 w-12 flex flex-col items-center justify-center"
             >
-              <Send size={20} className="ml-1" />
+              {/* Removed the ml-1 to perfectly center the icon */}
+              <Send size={20} />
             </button>
           ) : isRecording ? (
             <button
               onClick={stopRecording}
-              className="btn btn-circle bg-error hover:bg-error text-white border-none shadow-md h-12 w-12 animate-bounce"
+              className="btn btn-circle bg-error hover:bg-error text-white border-none shadow-md h-12 w-12 animate-bounce flex flex-col items-center justify-center"
             >
               <Square size={18} fill="currentColor" />
             </button>
           ) : (
             <button
               onClick={startRecording}
-              className="btn btn-circle bg-emerald-500 hover:bg-emerald-600 text-white border-none shadow-md h-12 w-12"
+              className="btn btn-circle bg-primary hover:bg-primary/90 text-primary-content border-none shadow-md h-12 w-12 flex flex-col items-center justify-center"
             >
               <Mic size={22} />
             </button>
